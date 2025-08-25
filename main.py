@@ -25,11 +25,18 @@ h = encoder.encoder(jnp.concat([OCEAN, opinions, topics],-1))
 
 init_graph = gu.generate_er_graph_jax(N, p=0.5, seed=None) # N*N adjacency matrix
 
+# eps = softplus(f_eps(z)); mu = sigmoid(f_mu(z)); gam = sigmoid(f_gam(z))
 
+# E = initial_random_edges(N, avg_deg)
 
-eps = softplus(f_eps(z)); mu = sigmoid(f_mu(z)); gam = sigmoid(f_gam(z))
+# Initiate MLP with input size 5 (from OCEAN)
+in_size = 5
+out_size = 3
+width_size = 6
+depth = 2
+activation = jax.nn.relu
+mlp = equinox.nn.MLP(in_size=in_size, out_size=out_size, width_size=width_size, depth=depth, activation=activation)
 
-E = initial_random_edges(N, avg_deg)
 
 @jax.jit
 def message_pass(features, graph):
