@@ -7,10 +7,10 @@ class Encoder(eqx.Module):
     """Two layer encoder for now"""
 
     layer_1: eqx.nn.Linear
-    layer_2 = eqx.nn.Linear
+    layer_2: eqx.nn.Linear
 
-    def __init__(self, in_features, hidden_features, out_features, *, key):
-        key, subkey = jax.random.split(start_key)
+    def __init__(self, in_features, hidden_features, out_features, *, key=start_key):
+        key, subkey = jax.random.split(key)
 
         self.layer_1 = eqx.nn.Linear(in_features, hidden_features, key=key)
         self.layer_2 = eqx.nn.Linear(hidden_features, out_features, key=subkey)

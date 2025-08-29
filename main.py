@@ -5,8 +5,12 @@ import equinox
 import networkx
 import graph_utils as gu
 import encoder
+import pandas as pd
 
-N = 100 # number of nodes 
+dataset = pd.read_csv(r'C:\Users\ndnde\Documents\Projects\ML\datasets\OCEAN attributes\OCEAN-synthetic_topics.csv')
+topic_prob = dataset.iloc[:,7:]
+
+N = len(topic_prob) # number of nodes 
 
 # random keys
 rootKey = jax.random.key(0)
@@ -18,10 +22,14 @@ OCEAN = jax.random.uniform(rootKey, shape=[N,5])
 opinions = jax.random.uniform(subkey, shape=[N,1])
 
 # Create opinions about 10 topics. See README file for topics and OCEAN filters.
-topics = jax.nn.softmax(jax.random.uniform(graphkey, shape=[10,1]), axis=0)
+topics = jax.nn.softmax(jax.random.uniform(graphkey, shape=[N,10]), axis=0)
 
-# Create latent encoding of OCEAN, opinions and topics
-h = encoder.encoder(jnp.concat([OCEAN, opinions, topics],-1))
+# Create latent encoding h of OCEAN, opinions and topics
+feat_encoder = encoder.Encoder(jnp.size(jnp.concatenate([OCEAN, opinions, topics],-1).T,0), 
+                               64,
+                               3)
+vmap_encoder = jax.vmap(feat_encoder, in_axes=(0,))
+h = vmap_encoder(jnp.concatenate([OCEAN, opinions, topics],-1))
 
 init_graph = gu.generate_er_graph_jax(N, p=0.5, seed=None) # N*N adjacency matrix
 
@@ -37,7 +45,7 @@ depth = 2
 activation = jax.nn.relu
 mlp = equinox.nn.MLP(in_size=in_size, out_size=out_size, width_size=width_size, depth=depth, activation=activation)
 
-
+"""
 @jax.jit
 def message_pass(features, graph):
     features -> encode 
@@ -57,3 +65,4 @@ for 1:T_steps:
     for 1:Batches:
         updated_features = message_pass(fetures)
         loss = loss(updated_features,features)
+"""
