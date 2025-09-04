@@ -20,7 +20,8 @@ def generate_er_graph_jax(n, p, seed=None):
     graph = nx.erdos_renyi_graph(n, p, seed=seed)
 
     adjacency_matrix = jnp.array(nx.to_numpy_array(graph))
-    return adjacency_matrix
+    edges = graph.edges()
+    return adjacency_matrix, edges
 
 def visualize_graph(adjacency_matrix):
     
