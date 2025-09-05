@@ -35,11 +35,11 @@ feat_encoder = encoder.Encoder(jnp.size(jnp.concatenate([OCEAN, opinions],-1).T,
 vmap_encoder = jax.vmap(feat_encoder, in_axes=(0,))
 h0 = vmap_encoder(jnp.concatenate([OCEAN, opinions],-1)) # initiate the weights. will probably move this into training loop
 
-init_graph, edges = gu.generate_er_graph_jax(N, p=0.5, seed=None) # N*N adjacency matrix
-# gu.visualize_graph(init_graph) # takes a while for all the nodes. Use init_graph[:n,:n].
+init_graph, edges = gu.generate_er_graph_jax(N, p=0.002, seed=None) # N*N adjacency matrix
+gu.visualize_graph(init_graph) # takes a while for all the nodes. Use init_graph[:n,:n].
 
 # Initiate MLP with input size size_OCEAN + size_h (from OCEAN)
-in_size = 5 + topics.shape[1]
+in_size = OCEAN.shape[1] + topics.shape[1]
 out_size = 3
 width_size = 32
 depth = 2
@@ -55,7 +55,7 @@ activation = jax.nn.relu
 epsMLP = equinox.nn.MLP(in_size=in_size, out_size=out_size, width_size=width_size, depth=depth, activation=activation, key=subkey)
 nuMLP = equinox.nn.MLP(in_size=in_size, out_size=out_size, width_size=width_size, depth=depth, activation=activation, key=subkey)
    
-# @jax.jit
+# @equinox.filter_jit
 def step(params, state):
     """
     1. node r recieves tweets from surrounding nodes, phi(OCEAN_s, ENC(OCEAN_s, O_rs)
@@ -65,36 +65,44 @@ def step(params, state):
         2.3 opinion update 
             - O_rs' = relu(O_rs + nuMLP(O_rs) + noise(?) if O_rs < epsMLP
             - O_rs' = relu(O_rs + noise) otherwise
+        2.4 inject 
         
     return O_rs'
     """
     OCEAN, opinions, edges, h = state
     phiMLP, epsMLP, nuMLP = params
 
-    edges = list(edges)
-    senders, receivers = [s[1] for s in list(edges)], [r[0] for r in list(edges)]
+    senders, receivers = jnp.array([s[1] for s in list(edges)]), jnp.array([r[0] for r in list(edges)])
     OCEAN_s, OCEAN_r = OCEAN[senders], OCEAN[receivers]
     opinion_rs = opinions[receivers, senders]
     h_embed_s, h_embed_r = h[senders], h[receivers]
 
     # 1. node r recieves tweets from surrounding nodes, phi(OCEAN_s, ENC(OCEAN_s, O_rs))
-    m_sr = phiMLP(OCEAN_s, h_embed_s)
+    vmap_phiMLP = jax.vmap(phiMLP)
+    m_sr = vmap_phiMLP(jnp.concat((OCEAN_s, h_embed_s), axis=-1))
     
     # 2. node r "sees" tweet and interprets it 
     # 2.1
-    m_sr_p = m_sr * opinion_rs
+    m_sr_p = (opinion_rs * m_sr.T).T
 
     # 2.2 
-    confidence = epsMLP(OCEAN_r[:,0], OCEAN_r[:,3], m_sr_p)
-    flexibility = nuMLP(OCEAN_r[:,1], OCEAN_r[:,4], m_sr_p)
-    noise = (OCEAN[:,2]-0.5)*2 # ?
+    vmap_epsMLP = jax.vmap(epsMLP)
+    vmap_nuMLP = jax.vmap(nuMLP)
+    confidence = vmap_epsMLP(jnp.concat((OCEAN_r[:,[0]], OCEAN_r[:,[3]], m_sr_p), axis=-1))
+    flexibility = vmap_nuMLP(jnp.concat((OCEAN_r[:,[1]], OCEAN_r[:,[4]], m_sr_p), axis=-1))
+    noise = (OCEAN[:,[2]]-0.5)*2 # ? ###################################################################
     # 2.3
     if opinion_rs < confidence:
-        opinion_rs_p = jax.nn.relu(opinion_rs + flexibility * opinion_rs + noise)
+        opinion_rs_p = jax.nn.relu(opinion_rs + flexibility[:,0] * opinion_rs + noise)
     else:
         opinion_rs_p = jax.nn.relu(opinion_rs + noise)
 
-    return opinion_rs_p
+    # 2.4 Inject
+    # inject opinion_rs_p back into N*N format
+    for index, (r,s) in enumerate(edges):
+        opinions[r,s] = opinions[r,s] + opinion_rs_p[index]
+
+    return opinions
 
 # @equinox.filter_jit
 def loss_fn(K, params, state, topics, subkey, eps=1e-8):
@@ -108,7 +116,7 @@ def loss_fn(K, params, state, topics, subkey, eps=1e-8):
     return jnp.sum(losses)
 
 opt = optax.adam(lr)
-state0 = OCEAN, opinions, edges, h0
+state0 = OCEAN, opinions, list(edges), h0
 params = phiMLP, epsMLP, nuMLP
 for epoch in range(T_steps):
     rng, sub = jax.random.split(graphkey)
